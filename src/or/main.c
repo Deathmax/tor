@@ -2099,8 +2099,20 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
 /** If more than this many seconds have elapsed, probably the clock
  * jumped: doesn't count. */
 #define NUM_JUMPED_SECONDS_BEFORE_WARN 100
+/** On Android, the CPU sleeps very often and Tor gets suspended, and
+ * only wakes on network interrupts. This means clock jumps are common
+ * and marking circuits unusable every time Tor wakes up breaks hidden
+ * services as intro circs are cleaned the moment Tor wakes up, so we
+ * can never set up a rend point with clients. Another problem is that
+ * the CPU only stays awake for a few seconds at most (without wakelocks)
+ * and if we mark circuits unusable, we don't have time to re-establish
+ * new circs before being suspended (and the loop continues). On Android
+ * 6.0 and above, apps can only set alarms to wake up every 9 minutes at
+ * most, so if we end up suspending for longer than that, something bad
+ * has occured.*/
+#define NUM_JUMPED_SECONDS_AHEAD_BEFORE_WARN 600
   if (seconds_elapsed < -NUM_JUMPED_SECONDS_BEFORE_WARN ||
-      seconds_elapsed >= NUM_JUMPED_SECONDS_BEFORE_WARN) {
+      seconds_elapsed >= NUM_JUMPED_SECONDS_AHEAD_BEFORE_WARN) {
     circuit_note_clock_jumped(seconds_elapsed);
   } else if (seconds_elapsed > 0)
     stats_n_seconds_working += seconds_elapsed;

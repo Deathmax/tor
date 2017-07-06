@@ -46,6 +46,7 @@ periodic_event_dispatch(evutil_socket_t fd, short what, void *data)
   (void)what;
   periodic_event_item_t *event = data;
 
+  control_enable_important_work();
   time_t now = time(NULL);
   const or_options_t *options = get_options();
 //  log_debug(LD_GENERAL, "Dispatching %s", event->name);
@@ -75,6 +76,7 @@ periodic_event_dispatch(evutil_socket_t fd, short what, void *data)
 //           next_interval);
   struct timeval tv = { next_interval , 0 };
   event_add(event->ev, &tv);
+  control_disable_important_work();
 }
 
 /** Schedules <b>event</b> to run as soon as possible from now. */

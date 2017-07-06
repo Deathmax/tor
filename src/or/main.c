@@ -728,8 +728,14 @@ static void
 conn_read_callback(evutil_socket_t fd, short event, void *_conn)
 {
   connection_t *conn = _conn;
+  int is_control = conn->type == CONN_TYPE_CONTROL ||
+                   conn->type == CONN_TYPE_CONTROL_LISTENER;
   (void)fd;
   (void)event;
+
+  /** Don't try to send events if this is a control connection */
+  if (!is_control)
+    control_enable_important_work();
 
   log_debug(LD_NET,"socket %d wants to read.",(int)conn->s);
 
@@ -752,6 +758,9 @@ conn_read_callback(evutil_socket_t fd, short event, void *_conn)
 
   if (smartlist_len(closeable_connection_lst))
     close_closeable_connections();
+
+  if (!is_control)
+    control_disable_important_work();
 }
 
 /** Libevent callback: this gets invoked when (connection_t*)<b>conn</b> has
@@ -760,8 +769,14 @@ static void
 conn_write_callback(evutil_socket_t fd, short events, void *_conn)
 {
   connection_t *conn = _conn;
+  int is_control = conn->type == CONN_TYPE_CONTROL ||
+                   conn->type == CONN_TYPE_CONTROL_LISTENER;
   (void)fd;
   (void)events;
+
+  /** Don't try to send events if this is a control connection */
+  if (!is_control)
+    control_enable_important_work();
 
   LOG_FN_CONN(conn, (LOG_DEBUG, LD_NET, "socket %d wants to write.",
                      (int)conn->s));
@@ -790,6 +805,9 @@ conn_write_callback(evutil_socket_t fd, short events, void *_conn)
 
   if (smartlist_len(closeable_connection_lst))
     close_closeable_connections();
+
+  if (!is_control)
+    control_disable_important_work();
 }
 
 /** If the connection at connection_array[i] is marked for close, then:

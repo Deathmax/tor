@@ -658,6 +658,8 @@ control_initialize_event_queue(void)
     queued_control_events_lock = tor_mutex_new();
     tor_threadlocal_init(&block_event_queue_flag);
   }
+
+  control_initialize_status_work();
 }
 
 static int *
@@ -1166,6 +1168,7 @@ static const struct control_event_t control_event_table[] = {
   { EVENT_HS_DESC, "HS_DESC" },
   { EVENT_HS_DESC_CONTENT, "HS_DESC_CONTENT" },
   { EVENT_NETWORK_LIVENESS, "NETWORK_LIVENESS" },
+  { EVENT_STATUS_WORK, "STATUS_WORK" },
   { 0, NULL },
 };
 
@@ -7181,6 +7184,82 @@ control_event_hs_descriptor_upload_failed(const char *id_digest,
   }
   control_event_hs_descriptor_upload_end("UPLOAD_FAILED", onion_address,
                                          id_digest, reason);
+}
+
+/** True if there is important work (such as building circuits) that we don't
+ * want to be interrupted by a (mobile) CPU sleeping. */
+static int is_important_work_running = 0;
+
+static int enable_count = 0;
+static int disable_count = 0;
+
+/** Lock for writing to is_important_work_running */
+static tor_mutex_t *write_work_lock = NULL;
+
+/** Lock for reading to is_important_work_running */
+static tor_mutex_t *read_work_lock = NULL;
+
+void
+control_initialize_status_work(void)
+{
+  if (write_work_lock == NULL)
+    write_work_lock = tor_mutex_new();
+  if (read_work_lock == NULL)
+    read_work_lock = tor_mutex_new();
+}
+
+/** Called when entering critical events */
+void
+control_enable_important_work(void)
+{
+  tor_mutex_acquire(write_work_lock);
+
+  ++is_important_work_running;
+  log_debug(LD_CONTROL, "current value of is_important_work_running: %d (%d)",
+                        is_important_work_running, ++enable_count);
+  // Transitioned from false to true, send STATUS_WORK
+  if (is_important_work_running == 1)
+    control_event_status_work();
+
+  tor_mutex_release(write_work_lock);
+}
+
+/** Called when leaving critical events */
+void
+control_disable_important_work(void)
+{
+  tor_mutex_acquire(write_work_lock);
+
+  --is_important_work_running;
+  log_debug(LD_CONTROL, "current value of is_important_work_running: %d (%d)",
+                        is_important_work_running, ++disable_count);
+  // Transitioned from true to false, send STATUS_WORK
+  if (is_important_work_running == 0)
+    control_event_status_work();
+
+  tor_mutex_release(write_work_lock);
+}
+
+/** send STATUS_WORK event with the current value of is_important_work_running
+ * after it transitions */
+void
+control_event_status_work(void)
+{
+  if (!EVENT_IS_INTERESTING(EVENT_STATUS_WORK))
+    return;
+
+  tor_mutex_acquire(read_work_lock);
+
+  send_control_event(EVENT_STATUS_WORK,
+                     "650 STATUS_WORK %s ENABLE=%d DISABLE=%d\r\n",
+                     is_important_work_running?"TRUE":"FALSE",
+                     enable_count, disable_count);
+
+  tor_mutex_release(read_work_lock);
+
+  /* Force a flush, because motivating use is to signal controlling program
+     that Tor is busy in the middle of an event loop. */
+  queued_events_flush_all(1);
 }
 
 /** Free any leftover allocated memory of the control.c subsystem. */

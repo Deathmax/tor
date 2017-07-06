@@ -148,6 +148,11 @@ void control_event_hs_descriptor_content(const char *onion_address,
                                          const char *hsdir_fp,
                                          const char *content);
 
+void control_initialize_status_work(void);
+void control_enable_important_work(void);
+void control_disable_important_work(void);
+void control_event_status_work(void);
+
 void control_free_all(void);
 
 #ifdef CONTROL_PRIVATE
@@ -192,7 +197,8 @@ void control_free_all(void);
 #define EVENT_HS_DESC                 0x0021
 #define EVENT_HS_DESC_CONTENT         0x0022
 #define EVENT_NETWORK_LIVENESS        0x0023
-#define EVENT_MAX_                    0x0023
+#define EVENT_STATUS_WORK             0x0024
+#define EVENT_MAX_                    0x0024
 
 /* sizeof(control_connection_t.event_mask) in bits, currently a uint64_t */
 #define EVENT_CAPACITY_               0x0040

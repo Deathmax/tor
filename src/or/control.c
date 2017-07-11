@@ -813,6 +813,7 @@ flush_queued_events_cb(evutil_socket_t fd, short what, void *arg)
   (void) fd;
   (void) what;
   (void) arg;
+  control_wakelock_acquire();
   // Modify flush to force, we want control messages urgently on Android
   queued_events_flush_all(1);
 }
@@ -7190,7 +7191,8 @@ control_event_hs_descriptor_upload_failed(const char *id_digest,
 }
 
 /** True if there is important work (such as building circuits) that we don't
- * want to be interrupted by a (mobile) CPU sleeping. */
+ * want to be interrupted by a (mobile) CPU sleeping and we want a controller
+ * to acquire the wakelock for us. */
 static int should_acquire_wakelock = 0;
 
 static int enable_count = 0;
@@ -7299,11 +7301,14 @@ control_wakelock_acquire(void)
 
 /** Called when leaving critical events */
 void
-control_wakelock_release(void)
+control_wakelock_release(int force)
 {
   tor_mutex_acquire(write_work_lock);
 
-  --should_acquire_wakelock;
+  if (force)
+    should_acquire_wakelock = 0;
+  else
+    --should_acquire_wakelock;
   log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d (%d)",
                         should_acquire_wakelock, ++disable_count);
   // Transitioned from true to false, send signal

@@ -76,7 +76,6 @@ periodic_event_dispatch(evutil_socket_t fd, short what, void *data)
 //           next_interval);
   struct timeval tv = { next_interval , 0 };
   event_add(event->ev, &tv);
-  control_wakelock_release();
 }
 
 /** Schedules <b>event</b> to run as soon as possible from now. */

@@ -758,9 +758,6 @@ conn_read_callback(evutil_socket_t fd, short event, void *_conn)
 
   if (smartlist_len(closeable_connection_lst))
     close_closeable_connections();
-
-  if (!is_control)
-    control_wakelock_release();
 }
 
 /** Libevent callback: this gets invoked when (connection_t*)<b>conn</b> has
@@ -805,9 +802,6 @@ conn_write_callback(evutil_socket_t fd, short events, void *_conn)
 
   if (smartlist_len(closeable_connection_lst))
     close_closeable_connections();
-
-  if (!is_control)
-    control_wakelock_release();
 }
 
 /** If the connection at connection_array[i] is marked for close, then:
@@ -941,6 +935,8 @@ directory_all_unreachable_cb(evutil_socket_t fd, short event, void *arg)
   (void)arg;
 
   connection_t *conn;
+
+  control_wakelock_acquire();
 
   while ((conn = connection_get_by_type_state(CONN_TYPE_AP,
                                               AP_CONN_STATE_CIRCUIT_WAIT))) {
@@ -2140,8 +2136,6 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
   run_scheduled_events(now);
 
   current_second = now; /* remember which second it is, for next time */
-
-  control_wakelock_release();
 }
 
 #ifdef HAVE_SYSTEMD_209
@@ -2557,7 +2551,11 @@ run_main_loop_once(void)
    * connections to trigger events for.  Libevent will wait till one
    * of these happens, then run all the appropriate callbacks. */
   loop_result = event_base_loop(tor_libevent_get_base(),
-                                called_loop_once ? EVLOOP_ONCE : 0);
+                                EVLOOP_ONCE);
+                                // called_loop_once ? EVLOOP_ONCE : 0);
+
+  /** Release any wake locks we might have acquired during the event loop. */
+  control_wakelock_release(1); 
 
   /* Oh, the loop failed.  That might be an error that we need to
    * catch, but more likely, it's just an interrupted poll() call or something,
@@ -2624,6 +2622,8 @@ signal_callback(evutil_socket_t fd, short events, void *arg)
   const int sig = *sigptr;
   (void)fd;
   (void)events;
+
+  control_wakelock_acquire();
 
   process_signal(sig);
 }

@@ -735,7 +735,7 @@ conn_read_callback(evutil_socket_t fd, short event, void *_conn)
 
   /** Don't try to send events if this is a control connection */
   if (!is_control)
-    control_enable_important_work();
+    control_wakelock_acquire();
 
   log_debug(LD_NET,"socket %d wants to read.",(int)conn->s);
 
@@ -760,7 +760,7 @@ conn_read_callback(evutil_socket_t fd, short event, void *_conn)
     close_closeable_connections();
 
   if (!is_control)
-    control_disable_important_work();
+    control_wakelock_release();
 }
 
 /** Libevent callback: this gets invoked when (connection_t*)<b>conn</b> has
@@ -776,7 +776,7 @@ conn_write_callback(evutil_socket_t fd, short events, void *_conn)
 
   /** Don't try to send events if this is a control connection */
   if (!is_control)
-    control_enable_important_work();
+    control_wakelock_acquire();
 
   LOG_FN_CONN(conn, (LOG_DEBUG, LD_NET, "socket %d wants to write.",
                      (int)conn->s));
@@ -807,7 +807,7 @@ conn_write_callback(evutil_socket_t fd, short events, void *_conn)
     close_closeable_connections();
 
   if (!is_control)
-    control_disable_important_work();
+    control_wakelock_release();
 }
 
 /** If the connection at connection_array[i] is marked for close, then:
@@ -2058,6 +2058,8 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
   (void)timer;
   (void)arg;
 
+  control_wakelock_acquire();
+
   n_libevent_errors = 0;
 
   /* log_notice(LD_GENERAL, "Tick."); */
@@ -2138,6 +2140,8 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
   run_scheduled_events(now);
 
   current_second = now; /* remember which second it is, for next time */
+
+  control_wakelock_release();
 }
 
 #ifdef HAVE_SYSTEMD_209

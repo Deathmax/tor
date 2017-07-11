@@ -651,6 +651,8 @@ control_initialize_event_queue(void)
                                               -1, 0, flush_queued_events_cb,
                                               NULL);
       tor_assert(flush_queued_events_event);
+      // We really want control messages as fast as possible on Android
+      event_priority_set(flush_queued_events_event, 2);
     }
   }
 
@@ -811,7 +813,8 @@ flush_queued_events_cb(evutil_socket_t fd, short what, void *arg)
   (void) fd;
   (void) what;
   (void) arg;
-  queued_events_flush_all(0);
+  // Modify flush to force, we want control messages urgently on Android
+  queued_events_flush_all(1);
 }
 
 /** Send an event to all v1 controllers that are listening for code
@@ -7188,15 +7191,15 @@ control_event_hs_descriptor_upload_failed(const char *id_digest,
 
 /** True if there is important work (such as building circuits) that we don't
  * want to be interrupted by a (mobile) CPU sleeping. */
-static int is_important_work_running = 0;
+static int should_acquire_wakelock = 0;
 
 static int enable_count = 0;
 static int disable_count = 0;
 
-/** Lock for writing to is_important_work_running */
+/** Lock for writing to should_acquire_wakelock */
 static tor_mutex_t *write_work_lock = NULL;
 
-/** Lock for reading to is_important_work_running */
+/** Lock for reading to should_acquire_wakelock */
 static tor_mutex_t *read_work_lock = NULL;
 
 void
@@ -7210,40 +7213,40 @@ control_initialize_status_work(void)
 
 /** Called when entering critical events */
 void
-control_enable_important_work(void)
+control_wakelock_acquire(void)
 {
   tor_mutex_acquire(write_work_lock);
 
-  ++is_important_work_running;
-  log_debug(LD_CONTROL, "current value of is_important_work_running: %d (%d)",
-                        is_important_work_running, ++enable_count);
-  // Transitioned from false to true, send STATUS_WORK
-  if (is_important_work_running == 1)
-    control_event_status_work();
+  ++should_acquire_wakelock;
+  log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d (%d)",
+                        should_acquire_wakelock, ++enable_count);
+  // Transitioned from false to true, send signal
+  if (should_acquire_wakelock == 1)
+    control_event_wakelock();
 
   tor_mutex_release(write_work_lock);
 }
 
 /** Called when leaving critical events */
 void
-control_disable_important_work(void)
+control_wakelock_release(void)
 {
   tor_mutex_acquire(write_work_lock);
 
-  --is_important_work_running;
-  log_debug(LD_CONTROL, "current value of is_important_work_running: %d (%d)",
-                        is_important_work_running, ++disable_count);
-  // Transitioned from true to false, send STATUS_WORK
-  if (is_important_work_running == 0)
-    control_event_status_work();
+  --should_acquire_wakelock;
+  log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d (%d)",
+                        should_acquire_wakelock, ++disable_count);
+  // Transitioned from true to false, send signal
+  if (should_acquire_wakelock == 0)
+    control_event_wakelock();
 
   tor_mutex_release(write_work_lock);
 }
 
-/** send STATUS_WORK event with the current value of is_important_work_running
+/** send WAKELOCK event with the current value of should_acquire_wakelock
  * after it transitions */
 void
-control_event_status_work(void)
+control_event_wakelock(void)
 {
   if (!EVENT_IS_INTERESTING(EVENT_STATUS_WORK))
     return;

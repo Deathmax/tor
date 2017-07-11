@@ -149,9 +149,9 @@ void control_event_hs_descriptor_content(const char *onion_address,
                                          const char *content);
 
 void control_initialize_status_work(void);
-void control_enable_important_work(void);
-void control_disable_important_work(void);
-void control_event_status_work(void);
+void control_wakelock_acquire(void);
+void control_wakelock_release(void);
+void control_event_wakelock(void);
 
 void control_free_all(void);
 

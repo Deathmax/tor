@@ -7199,16 +7199,86 @@ static int disable_count = 0;
 /** Lock for writing to should_acquire_wakelock */
 static tor_mutex_t *write_work_lock = NULL;
 
-/** Lock for reading to should_acquire_wakelock */
-static tor_mutex_t *read_work_lock = NULL;
+static tor_socket_t status_acceptor = TOR_INVALID_SOCKET;
+
+void
+control_status_work_thread_main(void* arg)
+{
+  (void*) arg;
+  tor_socket_t listener = TOR_INVALID_SOCKET;
+  tor_socket_t connector = TOR_INVALID_SOCKET;
+  // struct sockaddr_in socksaddr;
+  struct sockaddr_un socksaddr;
+  struct sockaddr_storage listen_addr_ss;
+  struct sockaddr *listen_addr = (struct sockaddr *) &listen_addr_ss;
+  // char* buf = NULL;
+  // int len;
+  socklen_t size;
+  int sock_domain = AF_UNIX;
+  int sock_type = SOCK_STREAM;
+  int sock_protocol = 0;
+  int r;
+  log_debug(LD_CONTROL, "starting status worker thread");
+
+  listener = tor_open_socket(sock_domain, sock_type, sock_protocol);
+  if (!SOCKET_OK(listener)) {
+    log_debug(LD_CONTROL, "error with opening socket");
+  }
+
+  memset(&socksaddr, 0, sizeof(socksaddr));
+  memset(&listen_addr_ss, 0, sizeof(listen_addr_ss));
+  socksaddr.sun_family = AF_UNIX;
+#define STATUS_SOCKET_NAME "\0org.torproject.android.status"
+  memcpy(socksaddr.sun_path, STATUS_SOCKET_NAME, sizeof(STATUS_SOCKET_NAME)-1);
+  // log_debug(LD_CONTROL, "listening on %s", socksaddr.sun_path[1]);
+//   socksaddr.sin_family = AF_INET;
+// #define STATUS_CONTROL_PORT 51234
+// #define STATUS_CONTROL_ADDR 0x7f000001u
+//   socksaddr.sin_port = htons(STATUS_CONTROL_PORT);
+//   socksaddr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+  if (r = bind(listener, 
+              (struct sockaddr *)&socksaddr, 
+              sizeof(socksaddr.sun_family) + 
+              sizeof(STATUS_SOCKET_NAME) - 1) < 0) 
+    log_debug(LD_CONTROL, "error binding to socket: %d", r);
+  if (r = listen(listener, 1) < 0)
+    log_debug(LD_CONTROL, "error with listen(): %d", r);
+
+  size = sizeof(listen_addr_ss);
+  log_debug(LD_CONTROL, "Waiting for connection");
+  status_acceptor = tor_accept_socket(listener, listen_addr, &size);
+
+  if (!SOCKET_OK(status_acceptor)) {
+    log_debug(LD_CONTROL, "error with accepting socket %d", errno);
+  }
+  log_debug(LD_CONTROL, "accepted wakelock unix socket");
+
+  // tor_mutex_acquire(read_work_lock);
+  // // This is really hacky in every way possible.
+  // while (1) {
+  //   tor_cond_wait(wake_cond, read_work_lock, NULL);
+  //   log_debug(LD_CONTROL, "woke up from condition var: %d", 
+  //             should_acquire_wakelock);
+
+  //   len = tor_asprintf(&buf, "650 STATUS_WORK %s ENABLE=%d DISABLE=%d\r\n",
+  //                     should_acquire_wakelock?"TRUE":"FALSE",
+  //                     enable_count, disable_count);
+
+  //   log_debug(LD_CONTROL, "Writing %s", buf);
+
+  //   log_debug(LD_CONTROL, "write: %d (%d)", write_all(acceptor, buf, len, 1), errno);
+  // }
+  // tor_mutex_release(read_work_lock);
+}
 
 void
 control_initialize_status_work(void)
 {
   if (write_work_lock == NULL)
     write_work_lock = tor_mutex_new();
-  if (read_work_lock == NULL)
-    read_work_lock = tor_mutex_new();
+
+  spawn_func(control_status_work_thread_main, NULL);
 }
 
 /** Called when entering critical events */
@@ -7244,25 +7314,56 @@ control_wakelock_release(void)
 }
 
 /** send WAKELOCK event with the current value of should_acquire_wakelock
- * after it transitions */
+ * after it transitions. This blocks until the controller has sent a 1-byte
+ * response. */
 void
 control_event_wakelock(void)
 {
-  if (!EVENT_IS_INTERESTING(EVENT_STATUS_WORK))
+  char readbuf[128];
+  char* buf = NULL;
+  int len;
+  int writelen;
+  int readlen;
+  if (!SOCKET_OK(status_acceptor))
     return;
 
-  tor_mutex_acquire(read_work_lock);
+  log_debug(LD_CONTROL, "attempting to signal controller: %d", 
+              should_acquire_wakelock);
 
-  send_control_event(EVENT_STATUS_WORK,
-                     "650 STATUS_WORK %s ENABLE=%d DISABLE=%d\r\n",
-                     is_important_work_running?"TRUE":"FALSE",
-                     enable_count, disable_count);
+  len = tor_asprintf(&buf, "WAKELOCK %s ENABLE=%d DISABLE=%d\r\n",
+                      should_acquire_wakelock?"TRUE":"FALSE",
+                      enable_count, disable_count);
 
-  tor_mutex_release(read_work_lock);
+  log_debug(LD_CONTROL, "Writing %s", buf);
 
-  /* Force a flush, because motivating use is to signal controlling program
-     that Tor is busy in the middle of an event loop. */
-  queued_events_flush_all(1);
+  writelen = write_all(status_acceptor, buf, len, 1);
+  log_debug(LD_CONTROL, "write: %d (%d)", writelen, errno);
+
+  if (writelen < 0)
+    return;
+
+  readlen = read_all(status_acceptor, readbuf, 1, 1);
+  log_debug(LD_CONTROL, "read: %d (%d)", readlen, errno); 
+
+  if (readlen < 0)
+    return;
+  // // If we're using the thread-based approach, signal thread
+  // tor_cond_signal_one(wake_cond);
+  // if (!EVENT_IS_INTERESTING(EVENT_STATUS_WORK))
+  //   return;
+
+  // tor_mutex_acquire(read_work_lock);
+
+  // send_control_event(EVENT_STATUS_WORK,
+  //                    "650 STATUS_WORK %s ENABLE=%d DISABLE=%d\r\n",
+  //                    should_acquire_wakelock?"TRUE":"FALSE",
+  //                    enable_count, disable_count);
+
+  // tor_mutex_release(read_work_lock);
+
+  // /* Force a flush, because motivating use is to signal controlling program
+  //    that Tor is busy in the middle of an event loop. */
+  // queued_events_flush_all(1);
 }
 
 /** Free any leftover allocated memory of the control.c subsystem. */

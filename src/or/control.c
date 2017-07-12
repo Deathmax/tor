@@ -7287,13 +7287,15 @@ control_initialize_status_work(void)
 void
 control_wakelock_acquire(void)
 {
+  int old_value;
   tor_mutex_acquire(write_work_lock);
 
+  old_value = should_acquire_wakelock;
   ++should_acquire_wakelock;
   log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d (%d)",
                         should_acquire_wakelock, ++enable_count);
   // Transitioned from false to true, send signal
-  if (should_acquire_wakelock == 1)
+  if (should_acquire_wakelock > 0 && old_value == 0)
     control_event_wakelock();
 
   tor_mutex_release(write_work_lock);
@@ -7303,8 +7305,10 @@ control_wakelock_acquire(void)
 void
 control_wakelock_release(int force)
 {
+  int old_value;
   tor_mutex_acquire(write_work_lock);
 
+  old_value = should_acquire_wakelock;
   if (force)
     should_acquire_wakelock = 0;
   else
@@ -7312,7 +7316,7 @@ control_wakelock_release(int force)
   log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d (%d)",
                         should_acquire_wakelock, ++disable_count);
   // Transitioned from true to false, send signal
-  if (should_acquire_wakelock == 0)
+  if (should_acquire_wakelock == 0 && old_value > 0)
     control_event_wakelock();
 
   tor_mutex_release(write_work_lock);
@@ -7331,6 +7335,9 @@ control_event_wakelock(void)
   int readlen;
   if (!SOCKET_OK(status_acceptor))
     return;
+
+  // XXXX Might want to add a timeout to send/recv with setsockopt to prevent
+  // Tor from completely stalling.
 
   log_debug(LD_CONTROL, "attempting to signal controller: %d", 
               should_acquire_wakelock);

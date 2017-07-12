@@ -723,14 +723,10 @@ static void
 conn_read_callback(evutil_socket_t fd, short event, void *_conn)
 {
   connection_t *conn = _conn;
-  int is_control = conn->type == CONN_TYPE_CONTROL ||
-                   conn->type == CONN_TYPE_CONTROL_LISTENER;
   (void)fd;
   (void)event;
 
-  /** Don't try to send events if this is a control connection */
-  if (!is_control)
-    control_wakelock_acquire();
+  control_wakelock_acquire();
 
   log_debug(LD_NET,"socket %d wants to read.",(int)conn->s);
 
@@ -761,14 +757,10 @@ static void
 conn_write_callback(evutil_socket_t fd, short events, void *_conn)
 {
   connection_t *conn = _conn;
-  int is_control = conn->type == CONN_TYPE_CONTROL ||
-                   conn->type == CONN_TYPE_CONTROL_LISTENER;
   (void)fd;
   (void)events;
 
-  /** Don't try to send events if this is a control connection */
-  if (!is_control)
-    control_wakelock_acquire();
+  control_wakelock_acquire();
 
   LOG_FN_CONN(conn, (LOG_DEBUG, LD_NET, "socket %d wants to write.",
                      (int)conn->s));
@@ -2545,9 +2537,7 @@ run_main_loop_once(void)
    * an event, or the second ends, or until we have some active linked
    * connections to trigger events for.  Libevent will wait till one
    * of these happens, then run all the appropriate callbacks. */
-  loop_result = event_base_loop(tor_libevent_get_base(),
-                                EVLOOP_ONCE);
-                                // called_loop_once ? EVLOOP_ONCE : 0);
+  loop_result = event_base_loop(tor_libevent_get_base(), EVLOOP_ONCE);
 
   /** Release any wake locks we might have acquired during the event loop. */
   control_wakelock_release(1); 

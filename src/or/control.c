@@ -693,6 +693,8 @@ queue_control_event_string,(uint16_t event, char *msg))
     tor_free(msg);
     return;
   }
+  
+  log_debug(LD_CONTROL, "Queued control event: %s", msg);
 
   int *block_event_queue = get_block_event_queue();
   if (*block_event_queue) {

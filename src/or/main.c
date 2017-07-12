@@ -268,11 +268,6 @@ connection_add_impl(connection_t *conn, int is_connecting)
     conn->write_event = tor_event_new(tor_libevent_get_base(),
          conn->s, EV_WRITE|EV_PERSIST, conn_write_callback, conn);
     /* XXXX CHECK FOR NULL RETURN! */
-
-    /* Set priorities for connections, we want to handle some connections
-     * earlier than every other event */
-    event_priority_set(conn->read_event, 1);
-    event_priority_set(conn->write_event, 1);
   }
 
   log_debug(LD_NET,"new conn type %s, socket %d, address %s, n_conns %d.",

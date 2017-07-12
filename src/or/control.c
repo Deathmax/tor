@@ -651,8 +651,6 @@ control_initialize_event_queue(void)
                                               -1, 0, flush_queued_events_cb,
                                               NULL);
       tor_assert(flush_queued_events_event);
-      // We really want control messages as fast as possible on Android
-      event_priority_set(flush_queued_events_event, 2);
     }
   }
 

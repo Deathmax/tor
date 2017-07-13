@@ -658,8 +658,6 @@ control_initialize_event_queue(void)
     queued_control_events_lock = tor_mutex_new();
     tor_threadlocal_init(&block_event_queue_flag);
   }
-
-  control_initialize_status_work();
 }
 
 static int *
@@ -1169,6 +1167,7 @@ static const struct control_event_t control_event_table[] = {
   { EVENT_HS_DESC, "HS_DESC" },
   { EVENT_HS_DESC_CONTENT, "HS_DESC_CONTENT" },
   { EVENT_NETWORK_LIVENESS, "NETWORK_LIVENESS" },
+  { EVENT_WAKELOCK, "WAKELOCK" },
   { 0, NULL },
 };
 
@@ -7191,66 +7190,15 @@ control_event_hs_descriptor_upload_failed(const char *id_digest,
  * to acquire the wakelock for us. */
 static int should_acquire_wakelock = 0;
 
-static tor_socket_t status_acceptor = TOR_INVALID_SOCKET;
-
-void
-control_status_work_thread_main(void* arg)
-{
-  (void*) arg;
-  tor_socket_t listener = TOR_INVALID_SOCKET;
-  tor_socket_t connector = TOR_INVALID_SOCKET;
-  struct sockaddr_un socksaddr;
-  int r;
-  log_debug(LD_CONTROL, "starting status worker thread");
-
-  listener = tor_open_socket(AF_UNIX, SOCK_STREAM, 0);
-  if (!SOCKET_OK(listener)) {
-    log_debug(LD_CONTROL, "error with opening socket");
-    return;
-  }
-
-  memset(&socksaddr, 0, sizeof(socksaddr));
-  socksaddr.sun_family = AF_UNIX;
-#define STATUS_SOCKET_NAME "\0org.torproject.android.status"
-  memcpy(socksaddr.sun_path, STATUS_SOCKET_NAME, sizeof(STATUS_SOCKET_NAME)-1);
-
-  if ((r = bind(listener, 
-               (struct sockaddr *)&socksaddr, 
-               sizeof(socksaddr.sun_family) + 
-               sizeof(STATUS_SOCKET_NAME) - 1)) < 0) {
-    log_debug(LD_CONTROL, "error binding to socket: %d", r);
-    return;
-  }
-  if ((r = listen(listener, 1)) < 0) {
-    log_debug(LD_CONTROL, "error with listen(): %d", r);
-    return;
-  }
-
-  log_debug(LD_CONTROL, "Waiting for connection");
-  status_acceptor = tor_accept_socket(listener, NULL, 0);
-
-  if (!SOCKET_OK(status_acceptor)) {
-    log_debug(LD_CONTROL, "error with accepting socket %d", errno);
-    return;
-  }
-  log_debug(LD_CONTROL, "accepted wakelock unix socket");
-}
-
-void
-control_initialize_status_work(void)
-{
-  spawn_func(control_status_work_thread_main, NULL);
-}
-
 /** Called when entering events */
 void
 control_wakelock_acquire(void)
 {
   int old_value = should_acquire_wakelock;
   ++should_acquire_wakelock;
-  log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d (%d)",
-                        should_acquire_wakelock, ++enable_count);
-  // Transitioned from false to true, send signal
+  log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d",
+                        should_acquire_wakelock);
+  /* Transitioned from false to true, send signal */
   if (should_acquire_wakelock > 0 && old_value == 0)
     control_event_wakelock();
 }
@@ -7264,49 +7212,24 @@ control_wakelock_release(int force)
     should_acquire_wakelock = 0;
   else
     --should_acquire_wakelock;
-  log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d (%d)",
-                        should_acquire_wakelock, ++disable_count);
-  // Transitioned from true to false, send signal
+  log_debug(LD_CONTROL, "current value of should_acquire_wakelock: %d",
+                        should_acquire_wakelock);
+  /* Transitioned from true to false, send signal */
   if (should_acquire_wakelock == 0 && old_value > 0)
     control_event_wakelock();
 }
 
 /** send WAKELOCK event with the current value of should_acquire_wakelock
- * after it transitions. This blocks until the controller has sent a 1-byte
- * response. */
+ * after it transitions. */
 void
 control_event_wakelock(void)
 {
-  char readbuf[128];
-  char* buf = NULL;
-  int len;
-  int writelen;
-  int readlen;
-  if (!SOCKET_OK(status_acceptor))
+  if (!EVENT_IS_INTERESTING(EVENT_WAKELOCK))
     return;
-
-  // XXXX Might want to add a timeout to send/recv with setsockopt to prevent
-  // Tor from completely stalling.
-
-  log_debug(LD_CONTROL, "attempting to signal controller: %d", 
-              should_acquire_wakelock);
-
-  len = tor_asprintf(&buf, "WAKELOCK %s\r\n",
-                      should_acquire_wakelock?"TRUE":"FALSE");
-
-  log_debug(LD_CONTROL, "Writing %s", buf);
-
-  writelen = write_all(status_acceptor, buf, len, 1);
-  log_debug(LD_CONTROL, "write: %d (%d)", writelen, errno);
-
-  if (writelen < 0)
-    return;
-
-  readlen = read_all(status_acceptor, readbuf, 1, 1);
-  log_debug(LD_CONTROL, "read: %d (%d)", readlen, errno); 
-
-  if (readlen < 0)
-    return;
+  send_control_event(EVENT_WAKELOCK, "650 WAKELOCK %s\r\n",
+                     should_acquire_wakelock ? "TRUE" : "FALSE");
+  /* We want the controller to receive this event as fast as possible */
+  queued_events_flush_all(1);
 }
 
 /** Free any leftover allocated memory of the control.c subsystem. */

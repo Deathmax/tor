@@ -757,10 +757,12 @@ static void
 conn_write_callback(evutil_socket_t fd, short events, void *_conn)
 {
   connection_t *conn = _conn;
+  int is_control = conn->type == CONN_TYPE_CONTROL;
   (void)fd;
   (void)events;
 
-  control_wakelock_acquire();
+  if (!is_control)
+    control_wakelock_acquire();
 
   LOG_FN_CONN(conn, (LOG_DEBUG, LD_NET, "socket %d wants to write.",
                      (int)conn->s));

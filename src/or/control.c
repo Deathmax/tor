@@ -203,6 +203,7 @@ static int handle_control_add_onion(control_connection_t *conn, uint32_t len,
                                     const char *body);
 static int handle_control_del_onion(control_connection_t *conn, uint32_t len,
                                     const char *body);
+static int handle_control_enablewakelock(control_connection_t *conn);
 static int write_stream_target_to_buf(entry_connection_t *conn, char *buf,
                                       size_t len);
 static void orconn_target_get_name(char *buf, size_t len,
@@ -4800,6 +4801,21 @@ handle_control_del_onion(control_connection_t *conn,
   return 0;
 }
 
+static control_connection_t *wakelock_conn = NULL;
+
+/** Called when we get a ENABLEWAKELOCK command; assign conn to wakelock_conn
+ * and disable events related to wakelock_conn */
+static int
+handle_control_enablewakelock(control_connection_t *conn)
+{
+  log_debug(LD_CONTROL, "Control connection %s is now marked for wakelocks.",
+            TO_CONN(conn)->global_identifier);
+  wakelock_conn = conn;
+  connection_stop_reading(TO_CONN(conn));
+  connection_stop_writing(TO_CONN(conn));
+  send_control_done(conn);
+}
+
 /** Called when <b>conn</b> has no more bytes left on its outbuf. */
 int
 connection_control_finished_flushing(control_connection_t *conn)
@@ -5110,6 +5126,8 @@ connection_control_process_inbuf(control_connection_t *conn)
     memwipe(args, 0, cmd_data_len); /* Scrub the service id/pk. */
     if (ret)
       return -1;
+  } else if (!strcasecmp(conn->incoming_cmd, "ENABLEWAKELOCK")) {
+    handle_control_enablewakelock(conn);
   } else {
     connection_printf_to_buf(conn, "510 Unrecognized command \"%s\"\r\n",
                              conn->incoming_cmd);
@@ -7224,12 +7242,19 @@ control_wakelock_release(int force)
 void
 control_event_wakelock(void)
 {
-  if (!EVENT_IS_INTERESTING(EVENT_WAKELOCK))
+  char* buf = NULL;
+  int len;
+  if (!wakelock_conn)
     return;
-  send_control_event(EVENT_WAKELOCK, "650 WAKELOCK %s\r\n",
-                     should_acquire_wakelock ? "TRUE" : "FALSE");
-  /* We want the controller to receive this event as fast as possible */
-  queued_events_flush_all(1);
+  if (TO_CONN(wakelock_conn)->marked_for_close
+      || !SOCKET_OK(TO_CONN(wakelock_conn)->s))
+    return;
+
+  len = tor_asprintf(&buf, "650 WAKELOCK %s\r\n", should_acquire_wakelock ?
+                     "TRUE":"FALSE");
+
+  connection_write_str_to_buf(buf, wakelock_conn);
+  connection_flush(TO_CONN(wakelock_conn));
 }
 
 /** Free any leftover allocated memory of the control.c subsystem. */

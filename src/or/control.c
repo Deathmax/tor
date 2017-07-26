@@ -1168,7 +1168,6 @@ static const struct control_event_t control_event_table[] = {
   { EVENT_HS_DESC, "HS_DESC" },
   { EVENT_HS_DESC_CONTENT, "HS_DESC_CONTENT" },
   { EVENT_NETWORK_LIVENESS, "NETWORK_LIVENESS" },
-  { EVENT_WAKELOCK, "WAKELOCK" },
   { 0, NULL },
 };
 
@@ -4808,12 +4807,15 @@ static control_connection_t *wakelock_conn = NULL;
 static int
 handle_control_enablewakelock(control_connection_t *conn)
 {
-  log_debug(LD_CONTROL, "Control connection %s is now marked for wakelocks.",
-            TO_CONN(conn)->global_identifier);
-  wakelock_conn = conn;
-  connection_stop_reading(TO_CONN(conn));
-  connection_stop_writing(TO_CONN(conn));
+  if (wakelock_conn == NULL) {
+    log_debug(LD_CONTROL, "Control connection is now marked for wakelocks.");
+    wakelock_conn = conn;
+    connection_stop_reading(TO_CONN(conn));
+    connection_stop_writing(TO_CONN(conn));
+  }
   send_control_done(conn);
+  connection_flush(TO_CONN(conn));
+  return 0;
 }
 
 /** Called when <b>conn</b> has no more bytes left on its outbuf. */
@@ -7243,18 +7245,20 @@ void
 control_event_wakelock(void)
 {
   char* buf = NULL;
-  int len;
+  char outbuf[128];
   if (!wakelock_conn)
     return;
   if (TO_CONN(wakelock_conn)->marked_for_close
       || !SOCKET_OK(TO_CONN(wakelock_conn)->s))
     return;
 
-  len = tor_asprintf(&buf, "650 WAKELOCK %s\r\n", should_acquire_wakelock ?
-                     "TRUE":"FALSE");
+  tor_asprintf(&buf, "650 WAKELOCK %s\r\n", should_acquire_wakelock ?
+               "TRUE":"FALSE");
 
   connection_write_str_to_buf(buf, wakelock_conn);
   connection_flush(TO_CONN(wakelock_conn));
+  // Wait for any response from controller
+  tor_socket_recv(TO_CONN(wakelock_conn)->s, outbuf, 128, 0);
 }
 
 /** Free any leftover allocated memory of the control.c subsystem. */

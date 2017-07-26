@@ -2049,7 +2049,7 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
 
   n_libevent_errors = 0;
 
-  log_debug(LD_GENERAL, "Tick. Version: " __DATE__ " " __TIME__);
+  /* log_notice(LD_GENERAL, "Tick."); */
   now = time(NULL);
   update_approx_time(now);
 
@@ -2106,26 +2106,21 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
 /** If more than this many seconds have elapsed, probably the clock
  * jumped: doesn't count. */
 #define NUM_JUMPED_SECONDS_BEFORE_WARN 100
+
+#ifdef __ANDROID__
 /** On Android, the CPU sleeps very often and Tor gets suspended, and
  * only wakes on network interrupts. This means clock jumps are common
  * and marking circuits unusable every time Tor wakes up breaks hidden
- * services as intro circs are cleaned the moment Tor wakes up, so we
- * can never set up a rend point with clients. Another problem is that
- * the CPU only stays awake for a few seconds at most (without wakelocks)
- * and if we mark circuits unusable, we don't have time to re-establish
- * new circs before being suspended (and the loop continues). On Android
- * 6.0 and above, apps can only set alarms to wake up every 9 minutes at
- * most, so if we end up suspending for longer than that, something bad
- * has occured.*/
-#define NUM_JUMPED_SECONDS_AHEAD_BEFORE_WARN 600
+ * services as intro circs are cleaned the moment Tor wakes up.*/
+#undef NUM_JUMPED_SECONDS_BEFORE_WARN
+#define NUM_JUMPED_SECONDS_BEFORE_WARN 600
+#endif
+
   if (seconds_elapsed < -NUM_JUMPED_SECONDS_BEFORE_WARN ||
-      seconds_elapsed >= NUM_JUMPED_SECONDS_AHEAD_BEFORE_WARN) {
-//      seconds_elapsed >= NUM_JUMPED_SECONDS_BEFORE_WARN) {
+      seconds_elapsed >= NUM_JUMPED_SECONDS_BEFORE_WARN) {
     circuit_note_clock_jumped(seconds_elapsed);
   } else if (seconds_elapsed > 0)
     stats_n_seconds_working += seconds_elapsed;
-
-  log_info(LD_GENERAL, "Seconds elapsed=%d", seconds_elapsed);
 
   run_scheduled_events(now);
 
@@ -2523,8 +2518,6 @@ run_main_loop_once(void)
 {
   int loop_result;
 
-  log_debug(LD_GENERAL, __func__);
-
   if (nt_service_is_stopping())
     return 0;
 
@@ -2546,10 +2539,15 @@ run_main_loop_once(void)
    * an event, or the second ends, or until we have some active linked
    * connections to trigger events for.  Libevent will wait till one
    * of these happens, then run all the appropriate callbacks. */
-  loop_result = event_base_loop(tor_libevent_get_base(), EVLOOP_ONCE);
+  loop_result = event_base_loop(tor_libevent_get_base(),
+#ifndef __ANDROID__
+                                called_loop_once ? EVLOOP_ONCE : 0);
+#elif
+                                EVLOOP_ONCE);
+#endif
 
   /** Release any wake locks we might have acquired during the event loop. */
-  control_wakelock_release(1); 
+  control_wakelock_release(1);
 
   /* Oh, the loop failed.  That might be an error that we need to
    * catch, but more likely, it's just an interrupted poll() call or something,

@@ -203,7 +203,9 @@ static int handle_control_add_onion(control_connection_t *conn, uint32_t len,
                                     const char *body);
 static int handle_control_del_onion(control_connection_t *conn, uint32_t len,
                                     const char *body);
+#ifdef __ANDROID__
 static int handle_control_enablewakelock(control_connection_t *conn);
+#endif
 static int write_stream_target_to_buf(entry_connection_t *conn, char *buf,
                                       size_t len);
 static void orconn_target_get_name(char *buf, size_t len,
@@ -748,7 +750,6 @@ queued_event_free(queued_event_t *ev)
 static void
 queued_events_flush_all(int force)
 {
-  log_debug(LD_CONTROL, "flushing queued events");
   if (PREDICT_UNLIKELY(queued_control_events == NULL)) {
     return;
   }
@@ -783,7 +784,6 @@ queued_events_flush_all(int force)
     SMARTLIST_FOREACH_BEGIN(controllers, control_connection_t *,
                             control_conn) {
       if (control_conn->event_mask & bit) {
-        log_debug(LD_CONTROL, "Writing %s to buf", ev->msg);
         connection_write_to_buf(ev->msg, msg_len, TO_CONN(control_conn));
       }
     } SMARTLIST_FOREACH_END(control_conn);
@@ -794,8 +794,6 @@ queued_events_flush_all(int force)
   if (force) {
     SMARTLIST_FOREACH_BEGIN(controllers, control_connection_t *,
                             control_conn) {
-      log_debug(LD_CONTROL, "Forcing flush of socket "U64_FORMAT,
-                U64_PRINTF_ARG(TO_CONN(control_conn)->global_identifier));
       connection_flush(TO_CONN(control_conn));
     } SMARTLIST_FOREACH_END(control_conn);
   }
@@ -814,7 +812,7 @@ flush_queued_events_cb(evutil_socket_t fd, short what, void *arg)
   (void) fd;
   (void) what;
   (void) arg;
-  //control_wakelock_acquire();
+  control_wakelock_acquire();
   queued_events_flush_all(0);
 }
 
@@ -7215,6 +7213,8 @@ control_event_hs_descriptor_upload_failed(const char *id_digest,
                                          id_digest, reason);
 }
 
+#ifdef __ANDROID__
+
 /** True if there is important work (such as building circuits) that we don't
  * want to be interrupted by a (mobile) CPU sleeping and we want a controller
  * to acquire the wakelock for us. */
@@ -7270,6 +7270,8 @@ control_event_wakelock(void)
   // Wait for any response from controller
   tor_socket_recv(TO_CONN(wakelock_conn)->s, outbuf, 128, 0);
 }
+
+#endif
 
 /** Free any leftover allocated memory of the control.c subsystem. */
 void

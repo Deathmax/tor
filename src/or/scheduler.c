@@ -10,6 +10,8 @@
 #define SCHEDULER_PRIVATE_
 #include "scheduler.h"
 
+#include "control.h"
+
 #include <event2/event.h>
 
 /*

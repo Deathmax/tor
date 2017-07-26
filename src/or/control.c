@@ -748,6 +748,7 @@ queued_event_free(queued_event_t *ev)
 static void
 queued_events_flush_all(int force)
 {
+  log_debug(LD_CONTROL, "flushing queued events");
   if (PREDICT_UNLIKELY(queued_control_events == NULL)) {
     return;
   }
@@ -782,6 +783,7 @@ queued_events_flush_all(int force)
     SMARTLIST_FOREACH_BEGIN(controllers, control_connection_t *,
                             control_conn) {
       if (control_conn->event_mask & bit) {
+        log_debug(LD_CONTROL, "Writing %s to buf", ev->msg);
         connection_write_to_buf(ev->msg, msg_len, TO_CONN(control_conn));
       }
     } SMARTLIST_FOREACH_END(control_conn);
@@ -792,6 +794,8 @@ queued_events_flush_all(int force)
   if (force) {
     SMARTLIST_FOREACH_BEGIN(controllers, control_connection_t *,
                             control_conn) {
+      log_debug(LD_CONTROL, "Forcing flush of socket "U64_FORMAT,
+                U64_PRINTF_ARG(TO_CONN(control_conn)->global_identifier));
       connection_flush(TO_CONN(control_conn));
     } SMARTLIST_FOREACH_END(control_conn);
   }
@@ -810,7 +814,7 @@ flush_queued_events_cb(evutil_socket_t fd, short what, void *arg)
   (void) fd;
   (void) what;
   (void) arg;
-  control_wakelock_acquire();
+  //control_wakelock_acquire();
   queued_events_flush_all(0);
 }
 
@@ -4800,6 +4804,8 @@ handle_control_del_onion(control_connection_t *conn,
   return 0;
 }
 
+#ifdef __ANDROID__
+
 static control_connection_t *wakelock_conn = NULL;
 
 /** Called when we get a ENABLEWAKELOCK command; assign conn to wakelock_conn
@@ -4817,6 +4823,8 @@ handle_control_enablewakelock(control_connection_t *conn)
   connection_flush(TO_CONN(conn));
   return 0;
 }
+
+#endif
 
 /** Called when <b>conn</b> has no more bytes left on its outbuf. */
 int
@@ -5128,8 +5136,10 @@ connection_control_process_inbuf(control_connection_t *conn)
     memwipe(args, 0, cmd_data_len); /* Scrub the service id/pk. */
     if (ret)
       return -1;
+#ifdef __ANDROID__
   } else if (!strcasecmp(conn->incoming_cmd, "ENABLEWAKELOCK")) {
     handle_control_enablewakelock(conn);
+#endif
   } else {
     connection_printf_to_buf(conn, "510 Unrecognized command \"%s\"\r\n",
                              conn->incoming_cmd);

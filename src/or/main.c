@@ -723,10 +723,12 @@ static void
 conn_read_callback(evutil_socket_t fd, short event, void *_conn)
 {
   connection_t *conn = _conn;
+  const int is_control = (conn->type == CONN_TYPE_CONTROL);
   (void)fd;
   (void)event;
 
-  control_wakelock_acquire();
+  if (!is_control)
+    control_wakelock_acquire();
 
   log_debug(LD_NET,"socket %d wants to read.",(int)conn->s);
 
@@ -757,7 +759,7 @@ static void
 conn_write_callback(evutil_socket_t fd, short events, void *_conn)
 {
   connection_t *conn = _conn;
-  int is_control = conn->type == CONN_TYPE_CONTROL;
+  const int is_control = (conn->type == CONN_TYPE_CONTROL);
   (void)fd;
   (void)events;
 
@@ -2047,7 +2049,7 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
 
   n_libevent_errors = 0;
 
-  /* log_notice(LD_GENERAL, "Tick."); */
+  log_debug(LD_GENERAL, "Tick. Version: " __DATE__ " " __TIME__);
   now = time(NULL);
   update_approx_time(now);
 
@@ -2118,9 +2120,12 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
 #define NUM_JUMPED_SECONDS_AHEAD_BEFORE_WARN 600
   if (seconds_elapsed < -NUM_JUMPED_SECONDS_BEFORE_WARN ||
       seconds_elapsed >= NUM_JUMPED_SECONDS_AHEAD_BEFORE_WARN) {
+//      seconds_elapsed >= NUM_JUMPED_SECONDS_BEFORE_WARN) {
     circuit_note_clock_jumped(seconds_elapsed);
   } else if (seconds_elapsed > 0)
     stats_n_seconds_working += seconds_elapsed;
+
+  log_info(LD_GENERAL, "Seconds elapsed=%d", seconds_elapsed);
 
   run_scheduled_events(now);
 
@@ -2517,6 +2522,8 @@ static int
 run_main_loop_once(void)
 {
   int loop_result;
+
+  log_debug(LD_GENERAL, __func__);
 
   if (nt_service_is_stopping())
     return 0;

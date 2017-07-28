@@ -2181,6 +2181,16 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
 /** If more than this many seconds have elapsed, probably the clock
  * jumped: doesn't count. */
 #define NUM_JUMPED_SECONDS_BEFORE_WARN 100
+
+#ifdef __ANDROID__
+/** On Android, the CPU sleeps very often and Tor gets suspended, and
+ * only wakes on network interrupts. This means clock jumps are common
+ * and marking circuits unusable every time Tor wakes up breaks hidden
+ * services as intro circs are cleaned the moment Tor wakes up.*/
+#undef NUM_JUMPED_SECONDS_BEFORE_WARN
+#define NUM_JUMPED_SECONDS_BEFORE_WARN 600
+#endif
+
   if (seconds_elapsed < -NUM_JUMPED_SECONDS_BEFORE_WARN ||
       seconds_elapsed >= NUM_JUMPED_SECONDS_BEFORE_WARN) {
     circuit_note_clock_jumped(seconds_elapsed);

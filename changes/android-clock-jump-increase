@@ -1,0 +1,5 @@
+  o Minor feature:
+    - Increase NUM_JUMPED_SECONDS_BEFORE_WARN from 100s to 600s on
+      Android to improve reachability of hidden services hosted on
+      Android devices.
+

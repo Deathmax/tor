@@ -147,6 +147,11 @@ void control_event_hs_descriptor_content(const char *onion_address,
                                          const char *desc_id,
                                          const char *hsdir_fp,
                                          const char *content);
+#ifdef __ANDROID__
+void control_wakelock_acquire(void);
+void control_wakelock_release(void);
+void control_event_wakelock(int acquire);
+#endif
 
 void control_free_all(void);
 

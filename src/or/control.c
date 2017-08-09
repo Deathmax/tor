@@ -204,6 +204,9 @@ static int handle_control_add_onion(control_connection_t *conn, uint32_t len,
                                     const char *body);
 static int handle_control_del_onion(control_connection_t *conn, uint32_t len,
                                     const char *body);
+#ifdef __ANDROID__
+static int handle_control_markconnforwakelock(control_connection_t *conn);
+#endif
 static int write_stream_target_to_buf(entry_connection_t *conn, char *buf,
                                       size_t len);
 static void orconn_target_get_name(char *buf, size_t len,
@@ -810,6 +813,9 @@ flush_queued_events_cb(evutil_socket_t fd, short what, void *arg)
   (void) fd;
   (void) what;
   (void) arg;
+#ifdef __ANDROID__
+  control_wakelock_acquire();
+#endif
   queued_events_flush_all(0);
 }
 
@@ -4826,6 +4832,30 @@ handle_control_del_onion(control_connection_t *conn,
   return 0;
 }
 
+#ifdef __ANDROID__
+
+static control_connection_t *wakelock_conn = NULL;
+
+/** Called when we get a MARKCONNFORWAKELOCK command; assign conn to
+ * wakelock_conn and disable events related to wakelock_conn */
+static int
+handle_control_markconnforwakelock(control_connection_t *conn)
+{
+  if (wakelock_conn == NULL) {
+    log_debug(LD_CONTROL, "Control connection is now marked for wakelocks.");
+    wakelock_conn = conn;
+    /* Disable the read/write events from firing since we are directly
+     * using the socket and not connection_t */
+    connection_stop_reading(TO_CONN(conn));
+    connection_stop_writing(TO_CONN(conn));
+  }
+  send_control_done(conn);
+  connection_flush(TO_CONN(conn));
+  return 0;
+}
+
+#endif
+
 /** Called when <b>conn</b> has no more bytes left on its outbuf. */
 int
 connection_control_finished_flushing(control_connection_t *conn)
@@ -5177,6 +5207,10 @@ connection_control_process_inbuf(control_connection_t *conn)
     memwipe(args, 0, cmd_data_len); /* Scrub the service id/pk. */
     if (ret)
       return -1;
+#ifdef __ANDROID__
+  } else if (!strcasecmp(conn->incoming_cmd, "MARKCONNFORWAKELOCK")) {
+    handle_control_markconnforwakelock(conn);
+#endif
   } else {
     connection_printf_to_buf(conn, "510 Unrecognized command \"%s\"\r\n",
                              conn->incoming_cmd);
@@ -7260,6 +7294,54 @@ control_event_hs_descriptor_upload_failed(const char *id_digest,
   control_event_hs_descriptor_upload_end("UPLOAD_FAILED", onion_address,
                                          id_digest, reason);
 }
+
+#ifdef __ANDROID__
+/** True if there is important work (such as building circuits) that we don't
+ * want to be interrupted by a (mobile) CPU sleeping and we want a controller
+ * to acquire the wakelock for us. */
+static int should_acquire_wakelock = 0;
+
+/** Called when entering events */
+void
+control_wakelock_acquire(void)
+{
+  /* Transitioning from false to true, send signal */
+  if (!should_acquire_wakelock)
+    control_event_wakelock(1);
+  should_acquire_wakelock++;
+}
+
+/** Called when leaving event loop */
+void
+control_wakelock_release(void)
+{
+  /* Transitioning from true to false, send signal */
+  if (should_acquire_wakelock)
+    control_event_wakelock(0);
+  should_acquire_wakelock = 0;
+}
+
+/** send WAKELOCK event based on acquire. Will block until recv returns
+ * from reading a response from the controller. */
+void
+control_event_wakelock(int acquire)
+{
+  char* buf = NULL;
+  char outbuf[128];
+  if (!wakelock_conn)
+    return;
+  if (TO_CONN(wakelock_conn)->marked_for_close
+      || !SOCKET_OK(TO_CONN(wakelock_conn)->s))
+    return;
+
+  tor_asprintf(&buf, "650 WAKELOCK %s\r\n", acquire ? "ACQUIRE":"RELEASE");
+
+  connection_write_str_to_buf(buf, wakelock_conn);
+  connection_flush(TO_CONN(wakelock_conn));
+  /* Wait for any response from controller */
+  tor_socket_recv(TO_CONN(wakelock_conn)->s, outbuf, 128, 0);
+}
+#endif
 
 /** Free any leftover allocated memory of the control.c subsystem. */
 void

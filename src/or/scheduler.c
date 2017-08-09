@@ -10,6 +10,8 @@
 #define SCHEDULER_PRIVATE_
 #include "scheduler.h"
 
+#include "control.h"
+
 #include <event2/event.h>
 
 /*
@@ -254,6 +256,9 @@ scheduler_evt_callback(evutil_socket_t fd, short events, void *arg)
   (void)events;
   (void)arg;
   log_debug(LD_SCHED, "Scheduler event callback called");
+#ifdef __ANDROID__
+  control_wakelock_acquire();
+#endif
 
   tor_assert(run_sched_ev);
 

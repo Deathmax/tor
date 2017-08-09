@@ -15,6 +15,7 @@
 #include "compat_libevent.h"
 #include "config.h"
 #include "periodic.h"
+#include "control.h"
 
 #include <event2/event.h>
 
@@ -46,6 +47,9 @@ periodic_event_dispatch(evutil_socket_t fd, short what, void *data)
   (void)what;
   periodic_event_item_t *event = data;
 
+#ifdef __ANDROID__
+  control_wakelock_acquire();
+#endif
   time_t now = time(NULL);
   const or_options_t *options = get_options();
 //  log_debug(LD_GENERAL, "Dispatching %s", event->name);

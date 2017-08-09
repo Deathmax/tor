@@ -729,6 +729,11 @@ conn_read_callback(evutil_socket_t fd, short event, void *_conn)
   (void)fd;
   (void)event;
 
+#ifdef __ANDROID__
+  if (conn->type != CONN_TYPE_CONTROL)
+    control_wakelock_acquire();
+#endif
+
   log_debug(LD_NET,"socket %d wants to read.",(int)conn->s);
 
   /* assert_connection_ok(conn, time(NULL)); */
@@ -760,6 +765,11 @@ conn_write_callback(evutil_socket_t fd, short events, void *_conn)
   connection_t *conn = _conn;
   (void)fd;
   (void)events;
+
+#ifdef __ANDROID__
+  if (conn->type != CONN_TYPE_CONTROL)
+    control_wakelock_acquire();
+#endif
 
   LOG_FN_CONN(conn, (LOG_DEBUG, LD_NET, "socket %d wants to write.",
                      (int)conn->s));
@@ -921,6 +931,10 @@ directory_all_unreachable_cb(evutil_socket_t fd, short event, void *arg)
   (void)arg;
 
   connection_t *conn;
+
+#ifdef __ANDROID__
+    control_wakelock_acquire();
+#endif
 
   while ((conn = connection_get_by_type_state(CONN_TYPE_AP,
                                               AP_CONN_STATE_CIRCUIT_WAIT))) {
@@ -2122,6 +2136,10 @@ second_elapsed_callback(periodic_timer_t *timer, void *arg)
   (void)timer;
   (void)arg;
 
+#ifdef __ANDROID__
+    control_wakelock_acquire();
+#endif
+
   n_libevent_errors = 0;
 
   /* log_notice(LD_GENERAL, "Tick."); */
@@ -2605,7 +2623,14 @@ run_main_loop_once(void)
    * connections to trigger events for.  Libevent will wait till one
    * of these happens, then run all the appropriate callbacks. */
   loop_result = event_base_loop(tor_libevent_get_base(),
+#ifndef __ANDROID__
                                 called_loop_once ? EVLOOP_ONCE : 0);
+#else
+  /* Loop is run only once to release any wake locks acquire during loop */
+                                EVLOOP_ONCE);
+  /** Release any wake locks we might have acquired during the event loop. */
+  control_wakelock_release();
+#endif
 
   /* Oh, the loop failed.  That might be an error that we need to
    * catch, but more likely, it's just an interrupted poll() call or something,
@@ -2672,6 +2697,10 @@ signal_callback(evutil_socket_t fd, short events, void *arg)
   const int sig = *sigptr;
   (void)fd;
   (void)events;
+
+#ifdef __ANDROID__
+  control_wakelock_acquire();
+#endif
 
   process_signal(sig);
 }

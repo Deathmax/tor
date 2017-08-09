@@ -1,0 +1,7 @@
+  o Minor features (control):
+    - Add MARKCONNFORWAKELOCK command and WAKELOCK event on Android to
+      allow Tor to synchronously request the controller to acquire or
+      release a wake lock whilst in the middle of an event loop. Allows
+      Tor to  ensure all active events are completed before allowing the
+      mobile device to go back to sleep. 
+
